@@ -16,27 +16,43 @@ def fetch_transcript(url: str) -> List[dict]:
 
     return transcript
 
-def transcript_to_documents(transcript) -> List[Document]:
-    full_text = " ".join([entry.text for entry in transcript])
-    first_start = transcript[0].start if transcript else 0
+def transcript_to_documents(transcript) -> tuple[List[Document], list[dict]]:
+    entries = []
+    char_pos = 0
+    for entry in transcript:
+        entries.append({
+            "text": entry.text,
+            "start": entry.start,
+            "char_start": char_pos,
+        })
+        char_pos += len(entry.text) + 1
 
-    return [Document(
+    full_text = " ".join([e["text"] for e in entries])
+    doc = Document(
         page_content=full_text,
-        metadata={
-            "source": "youtube",
-            "start": first_start,
-        }
-    )]
+        metadata={"source": "youtube", "start": entries[0]["start"]}
+    )
+    return [doc], entries
 
-def chunk_docs(documents: List[Document]):
+def chunk_docs(documents: List[Document], entries: list[dict]):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=3000,
+        chunk_size=4000,
         chunk_overlap=400,
         add_start_index=True,
     )
-
     chunks = text_splitter.split_documents(documents)
 
     for chunk in chunks:
-        chunk.metadata["chunk_id"] = f"{chunk.metadata.get('source', '')}_{chunk.metadata.get('start_index', 0)}"
+        start_index = chunk.metadata.get("start_index", 0)
+
+        real_start = entries[0]["start"]
+        for entry in entries:
+            if entry["char_start"] <= start_index:
+                real_start = entry["start"]
+            else:
+                break
+
+        chunk.metadata["start"] = real_start
+        chunk.metadata["chunk_id"] = f"youtube_{start_index}"
+
     return chunks
