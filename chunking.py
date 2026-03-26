@@ -2,20 +2,18 @@ from typing import List
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
+
 def transcript_to_documents(transcript: list) -> List[Document]:
-    docs = []
-    for entry in transcript:
-        docs.append(
-            Document(
-                page_content=entry["text"],
-                metadata={
-                    "source": "youtube",
-                    "start": entry.get("start"),
-                    "duration": entry.get("duration"),
-                }
-            )
-        )
-    return docs
+    full_text = " ".join([entry["text"] for entry in transcript])
+    first_start = transcript[0].get("start", 0) if transcript else 0
+
+    return [Document(
+        page_content=full_text,
+        metadata={
+            "source": "youtube",
+            "start": first_start,
+        }
+    )]
 
 def chunk_docs(documents: List[Document]):
     text_splitter = RecursiveCharacterTextSplitter(
