@@ -1,11 +1,24 @@
 from typing import List
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
+from youtube_transcript_api import YouTubeTranscriptApi
 
+def fetch_transcript(url: str) -> List[dict]:
+    if "v=" in url:
+        video_id = url.split("v=")[1].split("&")[0]
+    elif "youtu.be/" in url:
+        video_id = url.split("youtu.be/")[1].split("?")[0]
+    else:
+        return []
 
-def transcript_to_documents(transcript: list) -> List[Document]:
-    full_text = " ".join([entry["text"] for entry in transcript])
-    first_start = transcript[0].get("start", 0) if transcript else 0
+    ytt_api = YouTubeTranscriptApi()
+    transcript = ytt_api.fetch(video_id)
+
+    return transcript
+
+def transcript_to_documents(transcript) -> List[Document]:
+    full_text = " ".join([entry.text for entry in transcript])
+    first_start = transcript[0].start if transcript else 0
 
     return [Document(
         page_content=full_text,
@@ -17,8 +30,8 @@ def transcript_to_documents(transcript: list) -> List[Document]:
 
 def chunk_docs(documents: List[Document]):
     text_splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1500,
-        chunk_overlap=300,
+        chunk_size=3000,
+        chunk_overlap=400,
         add_start_index=True,
     )
 
