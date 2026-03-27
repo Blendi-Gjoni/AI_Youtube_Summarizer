@@ -3,7 +3,7 @@ import json
 import streamlit as st
 from dotenv import load_dotenv
 from chunking import fetch_transcript, transcript_to_documents, chunk_docs
-from summarize import summarize_chunks, combine_summaries
+from summarize import summarize_chunks, combine_summaries, generate_quiz, answer_question
 
 load_dotenv()
 
@@ -27,15 +27,16 @@ html,body,[data-testid="stAppViewContainer"]{background-color:#0a0a0a;color:#f0e
 [data-testid="stDownloadButton"] button{width:100%;background:transparent !important;color:#f0ede6 !important;border:1px solid rgba(255,255,255,0.15) !important;border-radius:8px !important;font-family:'Syne',sans-serif !important;font-weight:600 !important;font-size:0.8rem !important;letter-spacing:0.08em !important;text-transform:uppercase !important;padding:0.65rem 1.5rem !important;margin-top:0.5rem !important;}
 [data-testid="stDownloadButton"] button:hover{border-color:#ff4b2b !important;color:#ff4b2b !important;}
 [data-testid="stAlert"]{background:rgba(255,75,43,0.08) !important;border:1px solid rgba(255,75,43,0.3) !important;border-radius:8px !important;color:#ff4b2b !important;font-family:'DM Mono',monospace !important;font-size:0.8rem !important;}
+[data-testid="stRadio"] label{color:#c8c4bc !important;font-size:0.85rem !important;font-family:'DM Mono',monospace !important;}
+[data-testid="stRadio"] div[role="radiogroup"]{gap:0.4rem;}
 .footer{text-align:center;margin-top:3rem;font-size:0.7rem;color:#333;letter-spacing:0.1em;}
 </style>
 """, unsafe_allow_html=True)
 
 # ── Session state init ─────────────────────────────────────────────────────────
-if "sections" not in st.session_state:
-    st.session_state.sections = None
-if "summaries" not in st.session_state:
-    st.session_state.summaries = None
+for key in ["sections", "summaries", "quiz", "quiz_answers", "quiz_submitted", "qa_answer"]:
+    if key not in st.session_state:
+        st.session_state[key] = None
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -53,13 +54,11 @@ def seconds_to_timestamp(seconds: float) -> str:
 def parse_summary(raw: str) -> dict:
     try:
         cleaned = raw.strip()
-        # strip markdown code fences if present
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1]
         if cleaned.endswith("```"):
             cleaned = cleaned.rsplit("```", 1)[0]
         cleaned = cleaned.strip()
-
         data = json.loads(cleaned)
 
         def to_bullets(value) -> str:
@@ -72,8 +71,7 @@ def parse_summary(raw: str) -> dict:
             "key_points": to_bullets(data.get("key_points", [])),
             "action_items": to_bullets(data.get("action_items", [])),
         }
-    except Exception as e:
-        # fallback: return the raw text in tldr so something always shows
+    except Exception:
         return {"tldr": raw.strip(), "key_points": "", "action_items": ""}
 
 
@@ -137,19 +135,67 @@ def render_chapters(summaries: list):
             )
 
 
+def render_quiz(quiz: list):
+    st.markdown(
+        "<div style='font-family:DM Mono,monospace;font-size:0.65rem;font-weight:500;"
+        "letter-spacing:0.2em;text-transform:uppercase;color:#ff4b2b;margin-bottom:1rem;'>Quiz</div>",
+        unsafe_allow_html=True,
+    )
+
+    if st.session_state.quiz_answers is None:
+        st.session_state.quiz_answers = [None] * len(quiz)
+
+    for i, q in enumerate(quiz):
+        st.markdown(
+            f"<div style='font-size:0.88rem;color:#f0ede6;margin-bottom:0.4rem;font-weight:600;'>"
+            f"Q{i+1}. {html.escape(q['question'])}</div>",
+            unsafe_allow_html=True,
+        )
+        selected = st.radio(
+            label=f"q{i}",
+            options=q["options"],
+            index=None,
+            key=f"quiz_q{i}",
+            label_visibility="collapsed",
+        )
+        st.session_state.quiz_answers[i] = selected
+        st.markdown("<div style='margin-bottom:1rem;'></div>", unsafe_allow_html=True)
+
+    if st.button("Submit Quiz", key="submit_quiz"):
+        st.session_state.quiz_submitted = True
+
+    if st.session_state.quiz_submitted:
+        correct = 0
+        for i, q in enumerate(quiz):
+            user_ans = st.session_state.quiz_answers[i]
+            is_correct = user_ans == q["answer"]
+            if is_correct:
+                correct += 1
+            color = "#22c55e" if is_correct else "#ff4b2b"
+            icon = "✓" if is_correct else "✗"
+            st.markdown(
+                f"<div style='font-size:0.8rem;color:{color};margin-bottom:0.75rem;'>"
+                f"{icon} Q{i+1}: Correct answer — {html.escape(q['answer'])}</div>",
+                unsafe_allow_html=True,
+            )
+        score_pct = int((correct / len(quiz)) * 100)
+        st.markdown(
+            f"<div style='background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);"
+            f"border-radius:12px;padding:1rem 1.4rem;margin-top:0.5rem;font-size:0.88rem;color:#f0ede6;'>"
+            f"Score: <span style='color:#ff4b2b;font-weight:700;'>{correct}/{len(quiz)} ({score_pct}%)</span></div>",
+            unsafe_allow_html=True,
+        )
+
+
 def build_download_text(sections: dict) -> str:
     lines = []
     if sections.get("tldr"):
         lines += ["TL;DR", "-" * 40, sections["tldr"].strip(), ""]
     if sections.get("key_points"):
-        points = "\n".join(
-            l.strip() for l in sections["key_points"].splitlines() if l.strip()
-        )
+        points = "\n".join(l.strip() for l in sections["key_points"].splitlines() if l.strip())
         lines += ["KEY POINTS", "-" * 40, points, ""]
     if sections.get("action_items"):
-        actions = "\n".join(
-            l.strip() for l in sections["action_items"].splitlines() if l.strip()
-        )
+        actions = "\n".join(l.strip() for l in sections["action_items"].splitlines() if l.strip())
         lines += ["ACTION ITEMS", "-" * 40, actions, ""]
     return "\n".join(lines)
 
@@ -158,7 +204,7 @@ def build_download_text(sections: dict) -> str:
 st.markdown("""
 <div style='text-align:center;padding:2.5rem 0 2rem;'>
     <div style='font-family:DM Mono,monospace;font-size:0.7rem;font-weight:500;letter-spacing:0.2em;text-transform:uppercase;color:#ff4b2b;margin-bottom:0.75rem;'>AI-Powered</div>
-    <h1 style='font-family:DM Mono,monospace;font-size:clamp(2.4rem,6vw,3.6rem);font-weight:800;line-height:1.05;letter-spacing:-0.02em;color:#f0ede6;margin:0 0 1rem;'>YouTube<br><span style='color:#ff4b2b;'>Summarizer</span></h1>
+    <h1 style='font-family:Syne,sans-serif;font-size:clamp(2.4rem,6vw,3.6rem);font-weight:800;line-height:1.05;letter-spacing:-0.02em;color:#f0ede6;margin:0 0 1rem;'>YouTube<br><span style='color:#ff4b2b;'>Summarizer</span></h1>
     <p style='font-size:0.82rem;color:#6b6760;line-height:1.6;max-width:420px;margin:0 auto;text-align:center;'>Paste any YouTube URL and get a structured summary, key points, and action items in seconds.</p>
 </div>
 """, unsafe_allow_html=True)
@@ -172,6 +218,12 @@ if summarize_btn:
     if not url.strip():
         st.error("Please enter a YouTube URL.")
     else:
+        # reset features when summarizing a new video
+        st.session_state.quiz = None
+        st.session_state.quiz_answers = None
+        st.session_state.quiz_submitted = None
+        st.session_state.qa_answer = None
+
         with st.spinner("Fetching transcript and summarizing..."):
             try:
                 transcript = fetch_transcript(url.strip())
@@ -207,6 +259,52 @@ if st.session_state.sections:
         file_name="summary.txt",
         mime="text/plain",
     )
+
+    st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
+
+    # ── Divider ──
+    st.markdown(
+        "<div style='border-top:1px solid rgba(255,255,255,0.07);margin-bottom:2rem;'></div>",
+        unsafe_allow_html=True,
+    )
+
+    # ── Q&A ───────────────────────────────────────────────────────────────────
+    st.markdown(
+        "<div style='font-family:DM Mono,monospace;font-size:0.65rem;font-weight:500;"
+        "letter-spacing:0.2em;text-transform:uppercase;color:#ff4b2b;margin-bottom:0.75rem;'>Ask the Video</div>",
+        unsafe_allow_html=True,
+    )
+    question = st.text_input("Ask anything about this video", placeholder="What did they say about loneliness?", key="qa_input")
+    if st.button("Ask →", key="ask_btn"):
+        if question.strip():
+            with st.spinner("Thinking..."):
+                st.session_state.qa_answer = answer_question(question.strip(), summaries)
+
+    if st.session_state.qa_answer:
+        card("Answer", f"<p style='margin:0;'>{html.escape(st.session_state.qa_answer)}</p>")
+
+    st.markdown("<div style='margin-top:2rem;'></div>", unsafe_allow_html=True)
+
+    # ── Quiz ──────────────────────────────────────────────────────────────────
+    if st.session_state.quiz is None:
+        if st.button("Generate Quiz →", key="gen_quiz"):
+            with st.spinner("Generating quiz..."):
+                try:
+                    st.session_state.quiz = generate_quiz(summaries, num_questions=5)
+                    st.session_state.quiz_answers = None
+                    st.session_state.quiz_submitted = None
+                except Exception as e:
+                    st.error(f"Couldn't generate quiz: {e}")
+
+    if st.session_state.quiz:
+        with st.container():
+            st.markdown(
+                "<div style='background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.07);"
+                "border-radius:12px;padding:1.4rem 1.6rem;margin-bottom:1rem;'>",
+                unsafe_allow_html=True,
+            )
+            render_quiz(st.session_state.quiz)
+            st.markdown("</div>", unsafe_allow_html=True)
 
 # ── Footer ─────────────────────────────────────────────────────────────────────
 st.markdown('<div class="footer">BUILT WITH LANGCHAIN + OPENAI</div>', unsafe_allow_html=True)

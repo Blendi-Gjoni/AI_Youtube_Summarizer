@@ -2,6 +2,7 @@ from llm import llm
 from chunking import fetch_transcript, chunk_docs, transcript_to_documents
 from langchain_core.documents import Document
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 
 
 def summarize_chunks(chunks: list[Document]) -> list[dict]:
@@ -41,8 +42,8 @@ def combine_summaries(summaries: list[dict]) -> str:
         Use exactly this structure:
         {{
             "tldr": "2-3 sentence summary here",
-            "key_points": ["point 1", "point 2", "point 3", ...],
-            "action_items": ["action 1", "action 2", ...]
+            "key_points": ["point 1", "point 2", "point 3"],
+            "action_items": ["action 1", "action 2"]
         }}
 
         If there are no action items, return an empty list for that field.
@@ -51,6 +52,55 @@ def combine_summaries(summaries: list[dict]) -> str:
         {joined}
     """)
     return response.content
+
+
+def generate_quiz(summaries: list[dict], num_questions: int = 5) -> list[dict]:
+    joined = "\n\n".join([s["summary"] for s in summaries])
+    response = llm.invoke(f"""
+        You are creating a multiple choice quiz based on the content of a YouTube video.
+        Generate exactly {num_questions} questions based on the content below.
+
+        You MUST respond with only a valid JSON array. No markdown, no backticks, no extra text.
+        Use exactly this structure:
+        [
+            {{
+                "question": "Question text here?",
+                "options": ["Option A", "Option B", "Option C", "Option D"],
+                "answer": "Option A"
+            }}
+        ]
+
+        Rules:
+        - The answer must be exactly one of the options, copied verbatim
+        - Make questions specific to the video content, not generic
+        - Vary the difficulty — mix easy recall and deeper comprehension questions
+        - Never repeat questions
+
+        Video content:
+        {joined}
+    """)
+    content = response.content.strip()
+    if content.startswith("```"):
+        content = content.split("\n", 1)[-1]
+    if content.endswith("```"):
+        content = content.rsplit("```", 1)[0]
+    return json.loads(content.strip())
+
+
+def answer_question(question: str, summaries: list[dict]) -> str:
+    joined = "\n\n".join([s["summary"] for s in summaries])
+    response = llm.invoke(f"""
+        You are answering a question about a YouTube video based on its summarized content.
+        Answer clearly and concisely. If the answer is not covered in the content, say so honestly.
+        Do not make up information.
+
+        Video content:
+        {joined}
+
+        Question: {question}
+    """)
+    return response.content
+
 
 def summarize_youtube_video(url: str):
     transcript = fetch_transcript(url)
