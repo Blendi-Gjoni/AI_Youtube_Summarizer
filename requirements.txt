@@ -5,3 +5,4 @@ langchain-openai
 youtube-transcript-api
 python-dotenv
 openai
+youtube-transcript-api[proxies]
