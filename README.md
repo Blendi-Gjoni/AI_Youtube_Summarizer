@@ -4,7 +4,7 @@ An AI-powered tool that takes any YouTube URL and returns a structured summary w
 
 Built with LangChain, OpenAI, and Streamlit.
 
-Available at: 
+Available at: [aiyoutube-summary.streamlit.app](https://aiyoutube-summary.streamlit.app/)
 
 ---
 
