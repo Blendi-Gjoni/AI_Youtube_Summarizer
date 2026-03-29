@@ -1,17 +1,7 @@
-import os
-from dotenv import load_dotenv
 from typing import List
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from youtube_transcript_api import YouTubeTranscriptApi
-from youtube_transcript_api.proxies import WebshareProxyConfig
-
-load_dotenv()
-
-proxy_config = WebshareProxyConfig(
-    proxy_username=os.getenv("WEBSHARE_USERNAME"),
-    proxy_password=os.getenv("WEBSHARE_PASSWORD"),
-)
 
 def fetch_transcript(url: str) -> List[dict]:
     if "v=" in url:
@@ -21,7 +11,7 @@ def fetch_transcript(url: str) -> List[dict]:
     else:
         return []
 
-    ytt_api = YouTubeTranscriptApi(proxy_config=proxy_config)
+    ytt_api = YouTubeTranscriptApi()
     transcript = ytt_api.fetch(video_id)
 
     return transcript
